@@ -1,4 +1,5 @@
 .env
+config.yml
 .venv/
 *.session
 *.session-journal
@@ -6,4 +7,3 @@
 __pycache__/
 .pytest_cache/
 output/
-

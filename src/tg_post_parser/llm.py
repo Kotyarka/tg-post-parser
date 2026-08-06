@@ -4,6 +4,7 @@ import base64
 import mimetypes
 from pathlib import Path
 
+import httpx
 from openai import AsyncOpenAI
 
 from .config import LLMConfig
@@ -21,7 +22,13 @@ SYSTEM_PROMPT = """Ты — редактор Telegram-канала. Обрабо
 class LLMRewriter:
     def __init__(self, config: LLMConfig, client: AsyncOpenAI | None = None) -> None:
         self.config = config
-        self.client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+        self.client = client or AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            # Temporary workaround for GigaChat certificate-chain errors.
+            # Restore certificate verification before production use.
+            http_client=httpx.AsyncClient(verify=False),
+        )
 
     @staticmethod
     def _data_url(path: Path) -> str:
@@ -59,4 +66,3 @@ class LLMRewriter:
         if not result or not result.strip():
             raise RuntimeError("LLM returned an empty response")
         return result.strip()
-
