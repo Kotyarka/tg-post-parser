@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tg-post-parser"
+version = "0.1.0"
+description = "Telegram source monitor with configurable LLM rewriting"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.50,<3",
+  "pydantic>=2.8,<3",
+  "PyYAML>=6.0,<7",
+  "Telethon>=1.36,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+
+[project.scripts]
+tg-post-parser = "tg_post_parser.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tg_post_parser"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+

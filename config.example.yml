@@ -1,0 +1,29 @@
+telegram:
+  api_id: 12345678
+  api_hash: "replace_me"
+  session: "tg_monitor"
+  # Необязательно: канал, куда публиковать обработанные посты.
+  # Бот/аккаунт должен иметь право публикации.
+  destination: null
+
+llm:
+  api_key: "replace_me"
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  vision_model: null
+  temperature: 0.3
+  max_tokens: 1800
+
+storage:
+  database: "state.db"
+  output_dir: "output"
+  # Суммарный лимит всех вложений одного поста/альбома.
+  max_post_download_mb: 100
+
+sources:
+  - chat: "https://t.me/example_channel"
+    enabled: true
+    prompt_addition: "Сохраняй деловой тон и все важные числовые данные."
+  - chat: "@another_public_channel"
+    enabled: false
+    prompt_addition: "Сделай текст короче, не более трех абзацев."
