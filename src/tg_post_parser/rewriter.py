@@ -1,3 +1,5 @@
+"""Переформулирование допущенных анализатором Telegram-постов через LLM."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,13 +18,17 @@ SYSTEM_PROMPT = """Ты — редактор Telegram-канала. Обрабо
 
 
 class PostRewriter:
+    """Создаёт финальный текст поста с учётом настроек источника."""
+
     def __init__(self, config: LLMConfig, provider: LLMProvider) -> None:
+        """Сохраняет параметры генерации и общий LLM-провайдер."""
         self.config = config
         self.provider = provider
 
     async def rewrite(
         self, text: str, image_paths: list[Path], prompt_addition: str = ""
     ) -> str:
+        """Переписывает текст и при возможности учитывает изображения."""
         instruction = "Исходный текст:\n" + (text.strip() or "[текст отсутствует]")
         if prompt_addition.strip():
             instruction += (

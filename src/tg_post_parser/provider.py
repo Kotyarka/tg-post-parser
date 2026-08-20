@@ -1,3 +1,5 @@
+"""Единый интерфейс выбора и вызова поддерживаемого LLM-провайдера."""
+
 from __future__ import annotations
 
 import base64
@@ -12,6 +14,8 @@ from .gigachat import GigaChatProvider, GigaChatTokenProvider
 
 
 class LLMProvider:
+    """Маршрутизирует запросы в обычный OpenAI API или отдельный GigaChat-клиент."""
+
     def __init__(
         self,
         config: LLMConfig,
@@ -19,6 +23,7 @@ class LLMProvider:
         client: AsyncOpenAI | None = None,
         token_provider: GigaChatTokenProvider | None = None,
     ) -> None:
+        """Создаёт клиент выбранного провайдера и настраивает его авторизацию."""
         self.config = config
         self.gigachat = gigachat or GigaChatConfig()
         self._owns_client = client is None
@@ -34,12 +39,14 @@ class LLMProvider:
             self.client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
 
     def model(self, image_paths: list[Path]) -> str:
+        """Выбирает текстовую или vision-модель для текущего запроса."""
         if self.gigachat.enabled:
             return self.gigachat.model
         return self.config.vision_model if image_paths and self.config.vision_model else self.config.model
 
     @staticmethod
     def _data_url(path: Path) -> str:
+        """Кодирует локальное изображение как data URL для OpenAI API."""
         mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
@@ -47,6 +54,7 @@ class LLMProvider:
     def content(
         self, instruction: str, image_paths: list[Path]
     ) -> str | list[dict[str, object]]:
+        """Формирует текстовое или мультимодальное содержимое сообщения."""
         if not image_paths or not self.config.vision_model or self.gigachat.enabled:
             return instruction
         content: list[dict[str, object]] = [{"type": "text", "text": instruction}]
@@ -57,11 +65,13 @@ class LLMProvider:
         return content
 
     async def complete(self, **kwargs: Any) -> Any:
+        """Выполняет запрос chat completions через активный провайдер."""
         if self._gigachat_provider:
             return await self._gigachat_provider.complete(**kwargs)
         return await self.client.chat.completions.create(**kwargs)
 
     async def close(self) -> None:
+        """Освобождает HTTP-ресурсы активного провайдера."""
         if self._gigachat_provider:
             await self._gigachat_provider.close()
             return

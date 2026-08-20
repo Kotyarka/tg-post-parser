@@ -1,3 +1,5 @@
+"""Модели данных для входящих, проанализированных и обработанных постов."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,6 +8,7 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class PostAnalysis:
+    """Результат проверки поста на дубликат и рекламный характер."""
     is_duplicate: bool
     is_advertisement: bool
     reason: str
@@ -13,6 +16,7 @@ class PostAnalysis:
 
 @dataclass(slots=True)
 class IncomingPost:
+    """Пост, полученный из Telegram вместе с локальными путями вложений."""
     source: str
     chat_id: int
     message_id: int
@@ -23,6 +27,7 @@ class IncomingPost:
 
 @dataclass(slots=True)
 class ProcessedPost:
+    """Готовый к сохранению и публикации результат обработки поста."""
     text: str
     source: str
     chat_id: int

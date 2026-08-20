@@ -1,3 +1,5 @@
+"""Клиент GigaChat с OAuth-обновлением токена и настройкой TLS."""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +15,7 @@ from .config import GigaChatConfig
 
 
 def ssl_verification(config: GigaChatConfig) -> bool | ssl.SSLContext:
+    """Возвращает режим TLS-проверки или контекст с пользовательским CA bundle."""
     if not config.verify_ssl:
         return False
     if config.ca_bundle_file:
@@ -21,11 +24,14 @@ def ssl_verification(config: GigaChatConfig) -> bool | ssl.SSLContext:
 
 
 class GigaChatTokenProvider:
+    """Получает, кэширует и заблаговременно обновляет OAuth-токен GigaChat."""
+
     def __init__(
         self,
         config: GigaChatConfig,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
+        """Создаёт OAuth-клиент и пустой потокобезопасный кэш токена."""
         self.config = config
         self._client = http_client or httpx.AsyncClient(verify=ssl_verification(config))
         self._owns_client = http_client is None
@@ -34,9 +40,11 @@ class GigaChatTokenProvider:
         self._lock = asyncio.Lock()
 
     def invalidate(self) -> None:
+        """Помечает текущий токен просроченным для принудительного обновления."""
         self._expires_at = 0.0
 
     async def get_token(self) -> str:
+        """Возвращает действующий токен либо получает новый через OAuth."""
         if self._token and time.time() < self._expires_at - 60:
             return self._token
         async with self._lock:
@@ -82,17 +90,21 @@ class GigaChatTokenProvider:
             return self._token
 
     async def close(self) -> None:
+        """Закрывает внутренний HTTP-клиент, если класс создал его сам."""
         if self._owns_client:
             await self._client.aclose()
 
 
 class GigaChatProvider:
+    """Выполняет OpenAI-совместимые запросы с актуальным токеном GigaChat."""
+
     def __init__(
         self,
         config: GigaChatConfig,
         client: AsyncOpenAI | None = None,
         token_provider: GigaChatTokenProvider | None = None,
     ) -> None:
+        """Создаёт API-клиент и подключает менеджер OAuth-токена."""
         self.config = config
         self._owns_client = client is None
         self.token_provider = token_provider or GigaChatTokenProvider(config)
@@ -103,6 +115,7 @@ class GigaChatProvider:
         )
 
     async def complete(self, **kwargs: Any) -> Any:
+        """Выполняет запрос и один раз повторяет его с новым токеном после 401."""
         self.client.api_key = await self.token_provider.get_token()
         try:
             return await self.client.chat.completions.create(**kwargs)
@@ -112,6 +125,7 @@ class GigaChatProvider:
             return await self.client.chat.completions.create(**kwargs)
 
     async def close(self) -> None:
+        """Закрывает API-клиент и менеджер токена."""
         if self._owns_client:
             await self.client.close()
         await self.token_provider.close()

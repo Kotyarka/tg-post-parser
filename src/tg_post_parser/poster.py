@@ -1,3 +1,5 @@
+"""Публикация обработанных текстов и вложений в целевой Telegram-канал."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,12 +8,16 @@ from .models import ProcessedPost
 
 
 class TelegramPoster:
+    """Отправляет готовые посты через существующий клиент Telethon."""
+
     def __init__(self, client: Any, destination: str | int | None) -> None:
+        """Привязывает Telegram-клиент и адрес назначения."""
         self.client = client
         self.destination = destination
 
     @staticmethod
     def split_text(text: str, limit: int = 4096) -> list[str]:
+        """Делит длинный текст по строкам или словам с учётом лимита Telegram."""
         if len(text) <= limit:
             return [text]
         chunks: list[str] = []
@@ -27,6 +33,7 @@ class TelegramPoster:
         return [chunk for chunk in chunks if chunk]
 
     async def publish(self, post: ProcessedPost) -> None:
+        """Публикует вложения с подписью либо отправляет длинный текст отдельно."""
         if self.destination is None:
             return
         if post.attachment_paths:

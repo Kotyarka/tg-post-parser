@@ -1,3 +1,5 @@
+"""Получение Telegram-постов и последовательный запуск этапов обработки."""
+
 from __future__ import annotations
 
 import json
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 class PostParser:
+    """Координирует анализ, рерайт, архивирование и учёт одного поста."""
+
     def __init__(
         self,
         analyzer: PostAnalyzer,
@@ -27,6 +31,7 @@ class PostParser:
         output_dir: Path,
         analysis: AnalysisConfig | None = None,
     ) -> None:
+        """Связывает этапы обработки с хранилищем и каталогом результатов."""
         self.analyzer = analyzer
         self.rewriter = rewriter
         self.store = store
@@ -35,6 +40,7 @@ class PostParser:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     async def process(self, post: IncomingPost, source: SourceConfig) -> ProcessedPost | None:
+        """Фильтрует и переписывает пост, возвращая результат для публикации."""
         if self.store.contains(post.chat_id, post.message_id):
             logger.debug("Skipping already processed post %s/%s", post.chat_id, post.message_id)
             return None
@@ -93,12 +99,15 @@ class PostParser:
 
 
 class TelegramParser:
+    """Читает события Telethon и преобразует сообщения в модели входящих постов."""
+
     def __init__(
         self,
         config: AppConfig,
         parser: PostParser,
         client: TelegramClient | None = None,
     ) -> None:
+        """Создаёт Telegram-клиент, публикационный этап и карту источников."""
         self.config = config
         self.parser = parser
         tg = config.telegram
@@ -107,6 +116,7 @@ class TelegramParser:
         self._sources: dict[int, SourceConfig] = {}
 
     async def _resolve_sources(self) -> list[Any]:
+        """Разрешает настроенные источники в Telegram-сущности и запоминает их ID."""
         entities: list[Any] = []
         for source in self.config.sources:
             if not source.enabled:
@@ -144,6 +154,7 @@ class TelegramParser:
 
     @staticmethod
     def _declared_file_size(message: Any) -> int:
+        """Возвращает заявленный Telegram размер вложения в байтах."""
         file_info = getattr(message, "file", None)
         return max(0, int(getattr(file_info, "size", 0) or 0))
 
@@ -187,6 +198,7 @@ class TelegramParser:
         return attachments, images
 
     async def _handle(self, event: Any) -> None:
+        """Обрабатывает событие с одиночным Telegram-сообщением."""
         message = event.message
         chat_id = int(event.chat_id)
         source = self._sources.get(chat_id)
@@ -214,6 +226,7 @@ class TelegramParser:
             logger.exception("Failed to process post %s/%s", chat_id, message.id)
 
     async def _handle_album(self, event: Any) -> None:
+        """Собирает сообщения Telegram-альбома в один входящий пост."""
         chat_id = int(event.chat_id)
         source = self._sources.get(chat_id)
         if source is None:
@@ -242,10 +255,12 @@ class TelegramParser:
             logger.exception("Failed to process album %s/%s", chat_id, first.id)
 
     async def _handle_single(self, event: Any) -> None:
+        """Передаёт обработчику только сообщения, не входящие в альбом."""
         if getattr(event.message, "grouped_id", None) is None:
             await self._handle(event)
 
     async def run(self) -> None:
+        """Подключается к Telegram, регистрирует обработчики и ждёт отключения."""
         await self.client.start()
         entities = await self._resolve_sources()
         self.client.add_event_handler(self._handle_single, events.NewMessage(chats=entities))

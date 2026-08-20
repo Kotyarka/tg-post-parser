@@ -1,3 +1,5 @@
+"""LLM-анализ постов на рекламу и смысловые дубликаты."""
+
 from __future__ import annotations
 
 import json
@@ -26,12 +28,16 @@ ANALYSIS_PROMPT = """Ты — фильтр входящих постов Telegra
 
 
 class PostAnalyzer:
+    """Сравнивает новый пост с историей и классифицирует нежелательный контент."""
+
     def __init__(self, config: LLMConfig, provider: LLMProvider) -> None:
+        """Сохраняет настройки генерации и общий транспорт LLM."""
         self.config = config
         self.provider = provider
 
     @staticmethod
     def _parse(content: str) -> PostAnalysis:
+        """Преобразует JSON-ответ модели в типизированный результат анализа."""
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -58,6 +64,7 @@ class PostAnalyzer:
     async def analyze(
         self, text: str, image_paths: list[Path], history: list[str]
     ) -> PostAnalysis:
+        """Отправляет текущий пост и историю в LLM и возвращает решение фильтра."""
         history_payload = [
             {"number": index, "text": historical_text}
             for index, historical_text in enumerate(history, start=1)

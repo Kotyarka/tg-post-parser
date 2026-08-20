@@ -1,3 +1,5 @@
+"""SQLite-хранилище истории обработки и исходных текстов постов."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -5,7 +7,10 @@ from pathlib import Path
 
 
 class PostStore:
+    """Управляет состоянием обработанных постов в локальной базе SQLite."""
+
     def __init__(self, path: Path) -> None:
+        """Открывает базу данных и выполняет необходимые миграции схемы."""
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path)
@@ -30,6 +35,7 @@ class PostStore:
         self._connection.commit()
 
     def contains(self, chat_id: int, message_id: int) -> bool:
+        """Проверяет, был ли Telegram-пост уже обработан."""
         row = self._connection.execute(
             "SELECT 1 FROM processed_posts WHERE chat_id = ? AND message_id = ?",
             (chat_id, message_id),
@@ -37,6 +43,7 @@ class PostStore:
         return row is not None
 
     def recent_published_texts(self, hours: int) -> list[str]:
+        """Возвращает исходные тексты опубликованных постов за заданный период."""
         rows = self._connection.execute(
             """SELECT original_text FROM processed_posts
                WHERE status = 'published'
@@ -56,6 +63,7 @@ class PostStore:
         status: str | None = None,
         filter_reason: str | None = None,
     ) -> None:
+        """Фиксирует результат обработки поста и причину возможной фильтрации."""
         self._connection.execute(
             """INSERT OR IGNORE INTO processed_posts(
                    chat_id, message_id, original_text, status, filter_reason
@@ -65,10 +73,13 @@ class PostStore:
         self._connection.commit()
 
     def close(self) -> None:
+        """Закрывает соединение с SQLite."""
         self._connection.close()
 
     def __enter__(self) -> "PostStore":
+        """Возвращает хранилище при входе в контекстный менеджер."""
         return self
 
     def __exit__(self, *_: object) -> None:
+        """Закрывает базу при выходе из контекстного менеджера."""
         self.close()

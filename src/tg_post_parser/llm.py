@@ -1,3 +1,5 @@
+"""Совместимый монолитный LLM-клиент с анализом, рерайтом и GigaChat OAuth."""
+
 from __future__ import annotations
 
 import base64
@@ -44,11 +46,14 @@ ANALYSIS_PROMPT = """Ты — фильтр входящих постов Telegra
 
 
 class GigaChatTokenProvider:
+    """Получает и кэширует краткоживущий OAuth-токен GigaChat."""
+
     def __init__(
         self,
         config: GigaChatConfig,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
+        """Создаёт HTTP-клиент, блокировку и пустой кэш токена."""
         self.config = config
         self._client = http_client or httpx.AsyncClient(verify=_ssl_verification(config))
         self._owns_client = http_client is None
@@ -57,9 +62,11 @@ class GigaChatTokenProvider:
         self._lock = asyncio.Lock()
 
     def invalidate(self) -> None:
+        """Принудительно помечает текущий токен недействительным."""
         self._expires_at = 0.0
 
     async def get_token(self) -> str:
+        """Возвращает кэшированный токен либо получает новый через OAuth."""
         if self._token and time.time() < self._expires_at - 60:
             return self._token
         async with self._lock:
@@ -105,11 +112,13 @@ class GigaChatTokenProvider:
             return self._token
 
     async def close(self) -> None:
+        """Закрывает принадлежащий объекту HTTP-клиент."""
         if self._owns_client:
             await self._client.aclose()
 
 
 def _ssl_verification(config: GigaChatConfig) -> bool | ssl.SSLContext:
+    """Создаёт настройку TLS с системным или пользовательским набором CA."""
     if not config.verify_ssl:
         return False
     if config.ca_bundle_file:
@@ -118,6 +127,8 @@ def _ssl_verification(config: GigaChatConfig) -> bool | ssl.SSLContext:
 
 
 class LLMRewriter:
+    """Совместимый клиент, объединяющий предварительный анализ и рерайт."""
+
     def __init__(
         self,
         config: LLMConfig,
@@ -125,6 +136,7 @@ class LLMRewriter:
         client: AsyncOpenAI | None = None,
         token_provider: GigaChatTokenProvider | None = None,
     ) -> None:
+        """Выбирает обычный OpenAI-клиент либо клиент с авторизацией GigaChat."""
         self.config = config
         self.gigachat = gigachat or GigaChatConfig()
         self._owns_client = client is None
@@ -140,11 +152,13 @@ class LLMRewriter:
             self.client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
 
     def _model(self, image_paths: list[Path]) -> str:
+        """Определяет модель для текста или изображений текущего запроса."""
         if self.gigachat.enabled:
             return self.gigachat.model
         return self.config.vision_model if image_paths and self.config.vision_model else self.config.model
 
     async def _create_completion(self, **kwargs: Any) -> Any:
+        """Выполняет chat completion и обновляет GigaChat-токен после 401."""
         if not self._token_provider:
             return await self.client.chat.completions.create(**kwargs)
         self.client.api_key = await self._token_provider.get_token()
@@ -156,6 +170,7 @@ class LLMRewriter:
             return await self.client.chat.completions.create(**kwargs)
 
     async def close(self) -> None:
+        """Освобождает созданные LLM- и OAuth-клиенты."""
         if self._owns_client:
             await self.client.close()
         if self._token_provider:
@@ -163,6 +178,7 @@ class LLMRewriter:
 
     @staticmethod
     def _data_url(path: Path) -> str:
+        """Преобразует локальное изображение в data URL."""
         mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
@@ -170,6 +186,7 @@ class LLMRewriter:
     def _request_content(
         self, instruction: str, image_paths: list[Path]
     ) -> str | list[dict[str, object]]:
+        """Собирает текстовое или мультимодальное содержимое запроса."""
         if not image_paths or not self.config.vision_model or self.gigachat.enabled:
             return instruction
         content: list[dict[str, object]] = [{"type": "text", "text": instruction}]
@@ -181,6 +198,7 @@ class LLMRewriter:
 
     @staticmethod
     def _parse_analysis(content: str) -> PostAnalysis:
+        """Проверяет JSON-ответ анализатора и создаёт результат фильтрации."""
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -207,6 +225,7 @@ class LLMRewriter:
     async def analyze(
         self, text: str, image_paths: list[Path], history: list[str]
     ) -> PostAnalysis:
+        """Сравнивает пост с историей и определяет дубликаты и рекламу."""
         history_payload = [
             {"number": index, "text": historical_text}
             for index, historical_text in enumerate(history, start=1)
@@ -234,6 +253,7 @@ class LLMRewriter:
     async def rewrite(
         self, text: str, image_paths: list[Path], prompt_addition: str = ""
     ) -> str:
+        """Переформулирует допущенный пост с учётом инструкций источника."""
         instruction = "Исходный текст:\n" + (text.strip() or "[текст отсутствует]")
         if prompt_addition.strip():
             instruction += f"\n\nДополнительные требования для этого источника:\n{prompt_addition.strip()}"

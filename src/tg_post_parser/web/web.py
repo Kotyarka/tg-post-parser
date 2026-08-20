@@ -1,3 +1,5 @@
+"""FastAPI-сервер, управление процессом бота и хранение настроек веб-панели."""
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +34,14 @@ SECRET_PATHS = (
 
 
 class ConfigRepository:
+    """Читает, маскирует, валидирует и атомарно сохраняет YAML-конфигурацию."""
+
     def __init__(self, path: Path) -> None:
+        """Запоминает абсолютный путь к файлу конфигурации."""
         self.path = path.resolve()
 
     def _read(self) -> dict[str, Any]:
+        """Читает YAML как словарь либо возвращает пустую конфигурацию."""
         if not self.path.exists():
             return {}
         raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
@@ -45,6 +51,7 @@ class ConfigRepository:
 
     @staticmethod
     def _defaults() -> dict[str, Any]:
+        """Возвращает полную конфигурацию по умолчанию для веб-формы."""
         return {
             "telegram": {"api_id": 0, "api_hash": "", "session": "tg_monitor", "destination": None},
             "llm": {
@@ -79,6 +86,7 @@ class ConfigRepository:
 
     @staticmethod
     def _merge(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        """Рекурсивно объединяет входящие настройки с базовым словарём."""
         result = dict(base)
         for key, value in incoming.items():
             if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -88,6 +96,7 @@ class ConfigRepository:
         return result
 
     def public(self) -> dict[str, Any]:
+        """Возвращает настройки для браузера с замаскированными секретами."""
         merged = self._merge(self._defaults(), self._read())
         for section, field in SECRET_PATHS:
             if merged.get(section, {}).get(field):
@@ -95,6 +104,7 @@ class ConfigRepository:
         return merged
 
     def save(self, incoming: dict[str, Any]) -> dict[str, Any]:
+        """Валидирует и атомарно сохраняет настройки, не затирая скрытые секреты."""
         current = self._merge(self._defaults(), self._read())
         merged = self._merge(current, incoming)
         for section, field in SECRET_PATHS:
@@ -117,7 +127,10 @@ class ConfigRepository:
 
 
 class BotProcessManager:
+    """Запускает монитор отдельным процессом и транслирует его журнал браузеру."""
+
     def __init__(self, config_path: Path, working_directory: Path) -> None:
+        """Настраивает пути, состояние процесса, журнал и подписчиков."""
         self.config_path = config_path.resolve()
         self.working_directory = working_directory.resolve()
         self.process: asyncio.subprocess.Process | None = None
@@ -128,9 +141,11 @@ class BotProcessManager:
 
     @property
     def running(self) -> bool:
+        """Показывает, существует ли активный процесс мониторинга."""
         return self.process is not None and self.process.returncode is None
 
     def status(self) -> dict[str, Any]:
+        """Возвращает сериализуемое состояние процесса для API."""
         return {
             "running": self.running,
             "pid": self.process.pid if self.running and self.process else None,
@@ -138,12 +153,14 @@ class BotProcessManager:
         }
 
     def _broadcast(self, line: str) -> None:
+        """Добавляет строку в журнал и отправляет её всем подписчикам."""
         self.logs.append(line)
         for queue in tuple(self.subscribers):
             with contextlib.suppress(asyncio.QueueFull):
                 queue.put_nowait(line)
 
     async def start(self) -> dict[str, Any]:
+        """Запускает CLI-монитор в дочернем процессе."""
         if self.running:
             raise RuntimeError("Мониторинг уже запущен")
         if not self.config_path.exists():
@@ -173,11 +190,13 @@ class BotProcessManager:
         return self.status()
 
     async def _read_output(self) -> None:
+        """Читает объединённый вывод процесса и транслирует строки."""
         assert self.process and self.process.stdout
         while line := await self.process.stdout.readline():
             self._broadcast(line.decode("utf-8", errors="replace").rstrip())
 
     async def _wait_for_exit(self) -> None:
+        """Ожидает завершения процесса и фиксирует его код возврата."""
         assert self.process
         code = await self.process.wait()
         if self._reader_task:
@@ -186,6 +205,7 @@ class BotProcessManager:
         self._broadcast(f"[web] Процесс завершён с кодом {code}")
 
     async def stop(self) -> dict[str, Any]:
+        """Мягко останавливает монитор и принудительно завершает его по тайм-ауту."""
         if not self.running or not self.process:
             return self.status()
         self._broadcast("[web] Остановка мониторинга…")
@@ -198,12 +218,14 @@ class BotProcessManager:
         return self.status()
 
     async def send_input(self, value: str) -> None:
+        """Передаёт строку в stdin монитора для авторизации Telegram."""
         if not self.running or not self.process or not self.process.stdin:
             raise RuntimeError("Мониторинг не запущен")
         self.process.stdin.write((value + "\n").encode("utf-8"))
         await self.process.stdin.drain()
 
     async def subscribe(self) -> AsyncIterator[str]:
+        """Выдаёт историю журнала и последующие строки конкретному подписчику."""
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=500)
         self.subscribers.add(queue)
         try:
@@ -216,12 +238,14 @@ class BotProcessManager:
 
 
 def create_app(config_path: Path | str = "config.yml", static_path: Path | None = None) -> FastAPI:
+    """Создаёт FastAPI-приложение, REST API, WebSocket и раздачу фронтенда."""
     project_root = Path(__file__).resolve().parents[3]
     repository = ConfigRepository(Path(config_path))
     manager = BotProcessManager(repository.path, project_root)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        """Останавливает дочерний монитор при завершении веб-сервера."""
         yield
         await manager.stop()
 
@@ -231,6 +255,7 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.get("/api/config")
     async def get_config() -> dict[str, Any]:
+        """Возвращает браузеру публичное представление конфигурации."""
         try:
             return repository.public()
         except (OSError, ValueError, yaml.YAMLError) as exc:
@@ -238,6 +263,7 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.put("/api/config")
     async def save_config(payload: dict[str, Any]) -> dict[str, Any]:
+        """Сохраняет конфигурацию, если монитор в данный момент остановлен."""
         if manager.running:
             raise HTTPException(status_code=409, detail="Сначала остановите мониторинг")
         try:
@@ -247,10 +273,12 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.get("/api/bot/status")
     async def bot_status() -> dict[str, Any]:
+        """Возвращает состояние процесса мониторинга."""
         return manager.status()
 
     @app.post("/api/bot/start")
     async def start_bot() -> dict[str, Any]:
+        """Запускает процесс мониторинга через HTTP API."""
         try:
             return await manager.start()
         except RuntimeError as exc:
@@ -258,10 +286,12 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.post("/api/bot/stop")
     async def stop_bot() -> dict[str, Any]:
+        """Останавливает процесс мониторинга через HTTP API."""
         return await manager.stop()
 
     @app.post("/api/bot/input")
     async def bot_input(payload: dict[str, Any]) -> dict[str, bool]:
+        """Передаёт введённые пользователем данные в процесс мониторинга."""
         value = str(payload.get("value", ""))
         try:
             await manager.send_input(value)
@@ -271,6 +301,7 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.websocket("/api/logs")
     async def logs(websocket: WebSocket) -> None:
+        """Транслирует строки журнала клиенту по WebSocket."""
         await websocket.accept()
         try:
             async for line in manager.subscribe():
@@ -288,6 +319,7 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
     @app.get("/{path:path}", include_in_schema=False)
     async def frontend(path: str) -> FileResponse:
+        """Возвращает статический файл или главную страницу одностраничного UI."""
         requested = (web_root / path).resolve()
         if path and requested.is_relative_to(web_root.resolve()) and requested.is_file():
             return FileResponse(requested)
@@ -300,6 +332,7 @@ def create_app(config_path: Path | str = "config.yml", static_path: Path | None 
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Создаёт парсер параметров запуска веб-сервера."""
     parser = argparse.ArgumentParser(description="Web UI for Telegram Post Parser")
     parser.add_argument("--config", default="config.yml")
     parser.add_argument("--host", default="127.0.0.1")
@@ -309,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Запускает Uvicorn и при необходимости открывает панель в браузере."""
     args = build_parser().parse_args()
     if args.open_browser:
         Timer(1.2, lambda: webbrowser.open(f"http://{args.host}:{args.port}")).start()

@@ -1,3 +1,5 @@
+"""Схемы конфигурации и загрузка настроек приложения из YAML."""
+
 from __future__ import annotations
 
 import os
@@ -9,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 
 class TelegramConfig(BaseModel):
+    """Настройки Telegram-сессии, источников событий и целевого канала."""
     api_id: int
     api_hash: str
     session: str = "tg_monitor"
@@ -16,6 +19,7 @@ class TelegramConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    """Общие настройки OpenAI-совместимой языковой модели."""
     api_key: str = ""
     base_url: str | None = None
     model: str = "deepseek-chat"
@@ -25,6 +29,7 @@ class LLMConfig(BaseModel):
 
 
 class GigaChatConfig(BaseModel):
+    """Настройки подключения, OAuth и TLS для GigaChat."""
     enabled: bool = False
     authorization_key: str = ""
     scope: Literal["GIGACHAT_API_PERS", "GIGACHAT_API_B2B", "GIGACHAT_API_CORP"] = (
@@ -38,23 +43,27 @@ class GigaChatConfig(BaseModel):
 
     @model_validator(mode="after")
     def authorization_key_is_required_when_enabled(self) -> "GigaChatConfig":
+        """Требует Authorization Key при включённой интеграции GigaChat."""
         if self.enabled and not self.authorization_key.strip():
             raise ValueError("authorization_key is required when GigaChat is enabled")
         return self
 
 
 class StorageConfig(BaseModel):
+    """Настройки локальной базы, файлов результатов и лимита вложений."""
     database: Path = Path("state.db")
     output_dir: Path = Path("output")
     max_post_download_mb: float = Field(default=100, gt=0)
 
 
 class AnalysisConfig(BaseModel):
+    """Настройки предварительной фильтрации и глубины истории."""
     enabled: bool = True
     history_hours: int = Field(default=24, gt=0)
 
 
 class SourceConfig(BaseModel):
+    """Настройки одного отслеживаемого Telegram-источника."""
     chat: str | int
     enabled: bool = True
     prompt_addition: str = ""
@@ -62,12 +71,14 @@ class SourceConfig(BaseModel):
     @field_validator("chat")
     @classmethod
     def chat_is_not_blank(cls, value: str | int) -> str | int:
+        """Отклоняет пустое строковое имя источника."""
         if isinstance(value, str) and not value.strip():
             raise ValueError("source chat cannot be blank")
         return value
 
 
 class AppConfig(BaseModel):
+    """Корневая конфигурация всех компонентов приложения."""
     telegram: TelegramConfig
     llm: LLMConfig
     gigachat: GigaChatConfig = GigaChatConfig()
@@ -78,12 +89,14 @@ class AppConfig(BaseModel):
     @field_validator("sources")
     @classmethod
     def at_least_one_source(cls, value: list[SourceConfig]) -> list[SourceConfig]:
+        """Проверяет наличие хотя бы одного включённого источника."""
         if not any(source.enabled for source in value):
             raise ValueError("at least one source must be enabled")
         return value
 
 
 def _expand_env(value: Any) -> Any:
+    """Рекурсивно подставляет переменные окружения в значения конфигурации."""
     if isinstance(value, dict):
         return {key: _expand_env(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -94,6 +107,7 @@ def _expand_env(value: Any) -> Any:
 
 
 def load_config(path: str | Path) -> AppConfig:
+    """Читает YAML, валидирует настройки и разрешает относительные пути."""
     config_path = Path(path)
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
