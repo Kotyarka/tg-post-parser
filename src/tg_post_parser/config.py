@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 class TelegramConfig(BaseModel):
@@ -16,12 +16,31 @@ class TelegramConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    api_key: str
+    api_key: str = ""
     base_url: str | None = None
     model: str = "deepseek-chat"
     vision_model: str | None = None
     temperature: float = Field(default=0.3, ge=0, le=2)
     max_tokens: int = Field(default=1800, gt=0)
+
+
+class GigaChatConfig(BaseModel):
+    enabled: bool = False
+    authorization_key: str = ""
+    scope: Literal["GIGACHAT_API_PERS", "GIGACHAT_API_B2B", "GIGACHAT_API_CORP"] = (
+        "GIGACHAT_API_PERS"
+    )
+    model: str = "GigaChat"
+    base_url: str = "https://api.giga.chat/v1"
+    oauth_url: str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    verify_ssl: bool = True
+    ca_bundle_file: Path | None = None
+
+    @model_validator(mode="after")
+    def authorization_key_is_required_when_enabled(self) -> "GigaChatConfig":
+        if self.enabled and not self.authorization_key.strip():
+            raise ValueError("authorization_key is required when GigaChat is enabled")
+        return self
 
 
 class StorageConfig(BaseModel):
@@ -51,6 +70,7 @@ class SourceConfig(BaseModel):
 class AppConfig(BaseModel):
     telegram: TelegramConfig
     llm: LLMConfig
+    gigachat: GigaChatConfig = GigaChatConfig()
     analysis: AnalysisConfig = AnalysisConfig()
     storage: StorageConfig = StorageConfig()
     sources: list[SourceConfig]
@@ -92,4 +112,6 @@ def load_config(path: str | Path) -> AppConfig:
         config.storage.database = base / config.storage.database
     if not config.storage.output_dir.is_absolute():
         config.storage.output_dir = base / config.storage.output_dir
+    if config.gigachat.ca_bundle_file and not config.gigachat.ca_bundle_file.is_absolute():
+        config.gigachat.ca_bundle_file = base / config.gigachat.ca_bundle_file
     return config

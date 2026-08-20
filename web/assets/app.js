@@ -59,13 +59,23 @@ function Settings({ config, setConfig }) {
       <${Field} label="Имя сессии"><input value=${config.telegram.session} onChange=${e => set("telegram", "session", e.target.value)} /></${Field}>
       <${Field} label="Целевой канал" hint="Например, @my_channel. Оставьте пустым для локального сохранения."><input value=${config.telegram.destination || ""} onChange=${e => set("telegram", "destination", e.target.value || null)} /></${Field}>
     </${Section}>
-    <${Section} title="LLM-провайдер" description="OpenAI-совместимый API: GigaChat, DeepSeek или другой сервис">
+    <${Section} title="LLM-провайдер" description="OpenAI-совместимый API: DeepSeek или другой сервис">
       <${Field} label="API / Access Token"><input type="password" value=${config.llm.api_key} onFocus=${e => secretFocus("llm", "api_key", e.target.value)} onChange=${e => set("llm", "api_key", e.target.value)} /></${Field}>
       <${Field} label="Base URL"><input value=${config.llm.base_url || ""} onChange=${e => set("llm", "base_url", e.target.value || null)} /></${Field}>
       <${Field} label="Текстовая модель"><input value=${config.llm.model} onChange=${e => set("llm", "model", e.target.value)} /></${Field}>
       <${Field} label="Vision-модель" hint="Необязательно"><input value=${config.llm.vision_model || ""} onChange=${e => set("llm", "vision_model", e.target.value || null)} /></${Field}>
       <${Field} label="Температура"><input type="number" min="0" max="2" step="0.1" value=${config.llm.temperature} onChange=${e => set("llm", "temperature", Number(e.target.value))} /></${Field}>
       <${Field} label="Максимум токенов"><input type="number" min="1" value=${config.llm.max_tokens} onChange=${e => set("llm", "max_tokens", Number(e.target.value))} /></${Field}>
+    </${Section}>
+    <${Section} title="GigaChat" description="OAuth-авторизация и автоматическое обновление получасового токена">
+      <label className="switch-row setting-switch field-wide"><span><strong>Использовать GigaChat</strong><small>При включении заменяет основной OpenAI-совместимый провайдер</small></span><input type="checkbox" checked=${config.gigachat.enabled} onChange=${e => set("gigachat", "enabled", e.target.checked)} /><i></i></label>
+      <${Field} label="Ключ авторизации" hint="Authorization Key из личного кабинета GigaChat"><input type="password" disabled=${!config.gigachat.enabled} value=${config.gigachat.authorization_key} onFocus=${e => secretFocus("gigachat", "authorization_key", e.target.value)} onChange=${e => set("gigachat", "authorization_key", e.target.value)} /></${Field}>
+      <${Field} label="Scope"><select disabled=${!config.gigachat.enabled} value=${config.gigachat.scope} onChange=${e => set("gigachat", "scope", e.target.value)}><option value="GIGACHAT_API_PERS">Физлицо — PERS</option><option value="GIGACHAT_API_B2B">Бизнес — B2B</option><option value="GIGACHAT_API_CORP">Бизнес — CORP</option></select></${Field}>
+      <${Field} label="Модель" hint="Например, GigaChat или GigaChat-Pro"><input disabled=${!config.gigachat.enabled} value=${config.gigachat.model} onChange=${e => set("gigachat", "model", e.target.value)} /></${Field}>
+      <${Field} label="Base URL"><input disabled=${!config.gigachat.enabled} value=${config.gigachat.base_url} onChange=${e => set("gigachat", "base_url", e.target.value)} /></${Field}>
+      <${Field} label="OAuth URL"><input disabled=${!config.gigachat.enabled} value=${config.gigachat.oauth_url} onChange=${e => set("gigachat", "oauth_url", e.target.value)} /></${Field}>
+      <${Field} label="CA bundle" hint="Необязательный путь к сертификатам НУЦ Минцифры"><input disabled=${!config.gigachat.enabled} value=${config.gigachat.ca_bundle_file || ""} onChange=${e => set("gigachat", "ca_bundle_file", e.target.value || null)} /></${Field}>
+      <label className="switch-row setting-switch field-wide"><span><strong>Проверять TLS-сертификаты</strong><small>Отключать только временно для диагностики</small></span><input type="checkbox" disabled=${!config.gigachat.enabled} checked=${config.gigachat.verify_ssl} onChange=${e => set("gigachat", "verify_ssl", e.target.checked)} /><i></i></label>
     </${Section}>
     <${Section} title="Анализ и фильтрация" description="Проверка рекламы и смысловых дублей перед рерайтом">
       <label className="switch-row setting-switch"><span><strong>Предварительный анализ включён</strong><small>Реклама и полные дубли не будут опубликованы</small></span><input type="checkbox" checked=${config.analysis.enabled} onChange=${e => set("analysis", "enabled", e.target.checked)} /><i></i></label>

@@ -1,14 +1,19 @@
-from __future__ import annotations
+"""  """from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import mimetypes
+import ssl
+import time
+import uuid
 from pathlib import Path
+from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AuthenticationError
 
-from .config import LLMConfig
+from .config import GigaChatConfig, LLMConfig
 from .models import PostAnalysis
 
 SYSTEM_PROMPT = """Ты — редактор Telegram-канала. Обработай входной пост:
@@ -38,16 +43,123 @@ ANALYSIS_PROMPT = """Ты — фильтр входящих постов Telegra
 Поля is_duplicate и is_advertisement должны быть логическими значениями."""
 
 
-class LLMRewriter:
-    def __init__(self, config: LLMConfig, client: AsyncOpenAI | None = None) -> None:
+class GigaChatTokenProvider:
+    def __init__(
+        self,
+        config: GigaChatConfig,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.config = config
-        self.client = client or AsyncOpenAI(
-            api_key=config.api_key,
-            base_url=config.base_url,
-            # Temporary workaround for GigaChat certificate-chain errors.
-            # Restore certificate verification before production use.
-            http_client=httpx.AsyncClient(verify=False),
-        )
+        self._client = http_client or httpx.AsyncClient(verify=_ssl_verification(config))
+        self._owns_client = http_client is None
+        self._token: str | None = None
+        self._expires_at = 0.0
+        self._lock = asyncio.Lock()
+
+    def invalidate(self) -> None:
+        self._expires_at = 0.0
+
+    async def get_token(self) -> str:
+        if self._token and time.time() < self._expires_at - 60:
+            return self._token
+        async with self._lock:
+            if self._token and time.time() < self._expires_at - 60:
+                return self._token
+            authorization_key = self.config.authorization_key.strip()
+            if authorization_key.lower().startswith("basic "):
+                authorization_key = authorization_key[6:].strip()
+            if not authorization_key:
+                raise RuntimeError("Не задан ключ авторизации GigaChat")
+            response = await self._client.post(
+                self.config.oauth_url,
+                data={"scope": self.config.scope},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "RqUID": str(uuid.uuid4()),
+                    "Authorization": f"Basic {authorization_key}",
+                },
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                details = response.text.strip()[:500]
+                raise RuntimeError(
+                    f"GigaChat OAuth вернул HTTP {response.status_code}: {details}"
+                ) from exc
+            payload = response.json()
+            token = payload.get("access_token") if isinstance(payload, dict) else None
+            if not isinstance(token, str) or not token.strip():
+                raise RuntimeError("GigaChat OAuth не вернул access_token")
+            expires_at = payload.get("expires_at", time.time() + 29 * 60)
+            try:
+                expires_at = float(expires_at)
+            except (TypeError, ValueError):
+                expires_at = time.time() + 29 * 60
+            if expires_at > 100_000_000_000:
+                expires_at /= 1000
+            if expires_at <= time.time():
+                expires_at = time.time() + 29 * 60
+            self._token = token.strip()
+            self._expires_at = expires_at
+            return self._token
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+
+def _ssl_verification(config: GigaChatConfig) -> bool | ssl.SSLContext:
+    if not config.verify_ssl:
+        return False
+    if config.ca_bundle_file:
+        return ssl.create_default_context(cafile=str(config.ca_bundle_file))
+    return True
+
+
+class LLMRewriter:
+    def __init__(
+        self,
+        config: LLMConfig,
+        gigachat: GigaChatConfig | None = None,
+        client: AsyncOpenAI | None = None,
+        token_provider: GigaChatTokenProvider | None = None,
+    ) -> None:
+        self.config = config
+        self.gigachat = gigachat or GigaChatConfig()
+        self._owns_client = client is None
+        self._token_provider = token_provider
+        if self.gigachat.enabled:
+            self._token_provider = token_provider or GigaChatTokenProvider(self.gigachat)
+            self.client = client or AsyncOpenAI(
+                api_key="pending-gigachat-token",
+                base_url=self.gigachat.base_url,
+                http_client=httpx.AsyncClient(verify=_ssl_verification(self.gigachat)),
+            )
+        else:
+            self.client = client or AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+
+    def _model(self, image_paths: list[Path]) -> str:
+        if self.gigachat.enabled:
+            return self.gigachat.model
+        return self.config.vision_model if image_paths and self.config.vision_model else self.config.model
+
+    async def _create_completion(self, **kwargs: Any) -> Any:
+        if not self._token_provider:
+            return await self.client.chat.completions.create(**kwargs)
+        self.client.api_key = await self._token_provider.get_token()
+        try:
+            return await self.client.chat.completions.create(**kwargs)
+        except AuthenticationError:
+            self._token_provider.invalidate()
+            self.client.api_key = await self._token_provider.get_token()
+            return await self.client.chat.completions.create(**kwargs)
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self.client.close()
+        if self._token_provider:
+            await self._token_provider.close()
 
     @staticmethod
     def _data_url(path: Path) -> str:
@@ -58,7 +170,7 @@ class LLMRewriter:
     def _request_content(
         self, instruction: str, image_paths: list[Path]
     ) -> str | list[dict[str, object]]:
-        if not image_paths or not self.config.vision_model:
+        if not image_paths or not self.config.vision_model or self.gigachat.enabled:
             return instruction
         content: list[dict[str, object]] = [{"type": "text", "text": instruction}]
         content.extend(
@@ -105,9 +217,8 @@ class LLMRewriter:
             + "\n\nИстория ранее опубликованных постов:\n"
             + json.dumps(history_payload, ensure_ascii=False)
         )
-        model = self.config.vision_model if image_paths and self.config.vision_model else self.config.model
-        response = await self.client.chat.completions.create(
-            model=model,
+        response = await self._create_completion(
+            model=self._model(image_paths),
             messages=[
                 {"role": "system", "content": ANALYSIS_PROMPT},
                 {"role": "user", "content": self._request_content(instruction, image_paths)},
@@ -123,15 +234,14 @@ class LLMRewriter:
     async def rewrite(
         self, text: str, image_paths: list[Path], prompt_addition: str = ""
     ) -> str:
-        model = self.config.vision_model if image_paths and self.config.vision_model else self.config.model
         instruction = "Исходный текст:\n" + (text.strip() or "[текст отсутствует]")
         if prompt_addition.strip():
             instruction += f"\n\nДополнительные требования для этого источника:\n{prompt_addition.strip()}"
 
         content = self._request_content(instruction, image_paths)
 
-        response = await self.client.chat.completions.create(
-            model=model,
+        response = await self._create_completion(
+            model=self._model(image_paths),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},

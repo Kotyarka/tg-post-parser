@@ -1,10 +1,13 @@
+"""Tests for Telegram parsing and publication."""
+
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tg_post_parser.models import ProcessedPost
-from tg_post_parser.telegram import TelegramMonitor
+from tg_post_parser.parser import TelegramParser
+from tg_post_parser.poster import TelegramPoster
 
 
 class FakeMessage:
@@ -38,8 +41,8 @@ class FakeClient:
         self.messages.append((destination, text))
 
 
-def make_monitor(tmp_path: Path) -> TelegramMonitor:
-    monitor = object.__new__(TelegramMonitor)
+def make_monitor(tmp_path: Path) -> TelegramParser:
+    monitor = object.__new__(TelegramParser)
     monitor.config = SimpleNamespace(
         storage=SimpleNamespace(output_dir=tmp_path, max_post_download_mb=100),
         telegram=SimpleNamespace(destination="@destination"),
@@ -103,7 +106,8 @@ async def test_publish_sends_all_attachments_and_long_text_separately(tmp_path: 
         attachment_paths=paths,
     )
 
-    await monitor._publish(post)
+    poster = TelegramPoster(monitor.client, "@destination")
+    await poster.publish(post)
 
     assert monitor.client.files == [("@destination", paths, None)]
     assert "".join(text for _, text in monitor.client.messages) == post.text

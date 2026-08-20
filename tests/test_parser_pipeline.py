@@ -1,3 +1,5 @@
+"""Tests for the post-processing pipeline in parser.py."""
+
 import json
 from pathlib import Path
 
@@ -5,7 +7,7 @@ import pytest
 
 from tg_post_parser.config import SourceConfig
 from tg_post_parser.models import IncomingPost, PostAnalysis
-from tg_post_parser.service import PostProcessor
+from tg_post_parser.parser import PostParser
 from tg_post_parser.storage import PostStore
 
 
@@ -35,7 +37,7 @@ async def test_processor_persists_result_and_skips_duplicate(tmp_path: Path) -> 
         attachment_paths=[document],
     )
     with PostStore(tmp_path / "state.db") as store:
-        processor = PostProcessor(rewriter, store, tmp_path / "output")
+        processor = PostParser(rewriter, rewriter, store, tmp_path / "output")
         result = await processor.process(post, source)
         duplicate = await processor.process(post, source)
 
@@ -64,7 +66,7 @@ async def test_processor_filters_before_rewrite(tmp_path: Path, analysis, expect
     rewriter.analyze = analyze
     post = IncomingPost(source="@source", chat_id=1, message_id=2, text="original")
     with PostStore(tmp_path / "state.db") as store:
-        processor = PostProcessor(rewriter, store, tmp_path / "output")
+        processor = PostParser(rewriter, rewriter, store, tmp_path / "output")
         result = await processor.process(post, SourceConfig(chat="@source"))
         row = store._connection.execute(
             "SELECT status, filter_reason FROM processed_posts WHERE chat_id = 1 AND message_id = 2"

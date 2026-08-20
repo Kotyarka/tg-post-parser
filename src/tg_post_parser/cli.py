@@ -5,10 +5,11 @@ import asyncio
 import logging
 
 from .config import load_config
-from .llm import LLMRewriter
-from .service import PostProcessor
+from .analyzer import PostAnalyzer
+from .parser import PostParser, TelegramParser
+from .provider import LLMProvider
+from .rewriter import PostRewriter
 from .storage import PostStore
-from .telegram import TelegramMonitor
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,9 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
 async def async_main(config_path: str) -> None:
     config = load_config(config_path)
     with PostStore(config.storage.database) as store:
-        rewriter = LLMRewriter(config.llm)
-        processor = PostProcessor(rewriter, store, config.storage.output_dir, config.analysis)
-        await TelegramMonitor(config, processor).run()
+        provider = LLMProvider(config.llm, config.gigachat)
+        analyzer = PostAnalyzer(config.llm, provider)
+        rewriter = PostRewriter(config.llm, provider)
+        parser = PostParser(analyzer, rewriter, store, config.storage.output_dir, config.analysis)
+        try:
+            await TelegramParser(config, parser).run()
+        finally:
+            await provider.close()
 
 
 def main() -> None:

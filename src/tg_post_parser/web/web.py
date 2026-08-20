@@ -21,10 +21,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from .config import AppConfig
+from ..config import AppConfig
 
 SECRET_MASK = "••••••••"
-SECRET_PATHS = (("telegram", "api_hash"), ("llm", "api_key"))
+SECRET_PATHS = (
+    ("telegram", "api_hash"),
+    ("llm", "api_key"),
+    ("gigachat", "authorization_key"),
+)
 
 
 class ConfigRepository:
@@ -45,11 +49,21 @@ class ConfigRepository:
             "telegram": {"api_id": 0, "api_hash": "", "session": "tg_monitor", "destination": None},
             "llm": {
                 "api_key": "",
-                "base_url": "https://api.giga.chat/v1",
-                "model": "GigaChat",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-chat",
                 "vision_model": None,
                 "temperature": 0.3,
                 "max_tokens": 1800,
+            },
+            "gigachat": {
+                "enabled": False,
+                "authorization_key": "",
+                "scope": "GIGACHAT_API_PERS",
+                "model": "GigaChat",
+                "base_url": "https://api.giga.chat/v1",
+                "oauth_url": "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+                "verify_ssl": True,
+                "ca_bundle_file": None,
             },
             "analysis": {
                 "enabled": True,
@@ -202,7 +216,7 @@ class BotProcessManager:
 
 
 def create_app(config_path: Path | str = "config.yml", static_path: Path | None = None) -> FastAPI:
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     repository = ConfigRepository(Path(config_path))
     manager = BotProcessManager(repository.path, project_root)
 

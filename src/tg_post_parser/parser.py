@@ -1,24 +1,109 @@
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from telethon import TelegramClient, events, utils
 
-from .config import AppConfig, SourceConfig
+from .analyzer import PostAnalyzer
+from .config import AnalysisConfig, AppConfig, SourceConfig
 from .models import IncomingPost, ProcessedPost
-from .service import PostProcessor
+from .poster import TelegramPoster
+from .rewriter import PostRewriter
+from .storage import PostStore
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramMonitor:
-    def __init__(self, config: AppConfig, processor: PostProcessor) -> None:
+class PostParser:
+    def __init__(
+        self,
+        analyzer: PostAnalyzer,
+        rewriter: PostRewriter,
+        store: PostStore,
+        output_dir: Path,
+        analysis: AnalysisConfig | None = None,
+    ) -> None:
+        self.analyzer = analyzer
+        self.rewriter = rewriter
+        self.store = store
+        self.output_dir = output_dir
+        self.analysis = analysis or AnalysisConfig()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    async def process(self, post: IncomingPost, source: SourceConfig) -> ProcessedPost | None:
+        if self.store.contains(post.chat_id, post.message_id):
+            logger.debug("Skipping already processed post %s/%s", post.chat_id, post.message_id)
+            return None
+        if self.analysis.enabled:
+            history = self.store.recent_published_texts(self.analysis.history_hours)
+            analysis = await self.analyzer.analyze(post.text, post.image_paths, history)
+            if analysis.is_duplicate or analysis.is_advertisement:
+                status = (
+                    "filtered_advertisement"
+                    if analysis.is_advertisement
+                    else "filtered_duplicate"
+                )
+                self.store.mark_processed(
+                    post.chat_id,
+                    post.message_id,
+                    original_text=post.text,
+                    status=status,
+                    filter_reason=analysis.reason,
+                )
+                logger.info(
+                    "Filtered post %s/%s (%s): %s",
+                    post.chat_id,
+                    post.message_id,
+                    status,
+                    analysis.reason or "no reason provided",
+                )
+                return None
+        rewritten = await self.rewriter.rewrite(
+            post.text,
+            post.image_paths,
+            source.prompt_addition,
+        )
+        result = ProcessedPost(
+            text=rewritten,
+            source=post.source,
+            chat_id=post.chat_id,
+            message_id=post.message_id,
+            image_paths=post.image_paths,
+            attachment_paths=post.attachment_paths,
+        )
+        output_file = self.output_dir / f"{post.chat_id}_{post.message_id}.json"
+        payload = asdict(result)
+        payload["image_paths"] = [str(path) for path in result.image_paths]
+        payload["attachment_paths"] = [str(path) for path in result.attachment_paths]
+        output_file.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self.store.mark_processed(
+            post.chat_id,
+            post.message_id,
+            original_text=post.text,
+            status="published",
+        )
+        return result
+
+
+class TelegramParser:
+    def __init__(
+        self,
+        config: AppConfig,
+        parser: PostParser,
+        client: TelegramClient | None = None,
+    ) -> None:
         self.config = config
-        self.processor = processor
+        self.parser = parser
         tg = config.telegram
-        self.client = TelegramClient(tg.session, tg.api_id, tg.api_hash)
+        self.client = client or TelegramClient(tg.session, tg.api_id, tg.api_hash)
+        self.poster = TelegramPoster(self.client, tg.destination)
         self._sources: dict[int, SourceConfig] = {}
 
     async def _resolve_sources(self) -> list[Any]:
@@ -48,7 +133,6 @@ class TelegramMonitor:
         elif file_info is not None:
             target = directory / f"{message.id}{extension or '.bin'}"
         else:
-            # Web previews, polls and locations are media objects but not downloadable files.
             return [], []
         downloaded = await message.download_media(file=str(target))
         if not downloaded:
@@ -78,7 +162,6 @@ class TelegramMonitor:
                 limit_mb,
             )
             return None
-
         attachments: list[Path] = []
         images: list[Path] = []
         actual_total = 0
@@ -87,7 +170,11 @@ class TelegramMonitor:
             attachments.extend(downloaded)
             images.extend(downloadable_images)
             for path in downloaded:
-                actual_total += path.stat().st_size if path.exists() else self._declared_file_size(message)
+                actual_total += (
+                    path.stat().st_size
+                    if path.exists()
+                    else self._declared_file_size(message)
+                )
             if actual_total > limit_bytes:
                 logger.warning(
                     "Skipping post in chat %s: downloaded attachments size exceeds %.2f MB",
@@ -98,36 +185,6 @@ class TelegramMonitor:
                     path.unlink(missing_ok=True)
                 return None
         return attachments, images
-
-    @staticmethod
-    def _split_text(text: str, limit: int = 4096) -> list[str]:
-        if len(text) <= limit:
-            return [text]
-        chunks: list[str] = []
-        remaining = text
-        while remaining:
-            split_at = remaining.rfind("\n", 0, limit + 1)
-            if split_at <= 0:
-                split_at = remaining.rfind(" ", 0, limit + 1)
-            if split_at <= 0:
-                split_at = limit
-            chunks.append(remaining[:split_at].strip())
-            remaining = remaining[split_at:].strip()
-        return [chunk for chunk in chunks if chunk]
-
-    async def _publish(self, post: ProcessedPost) -> None:
-        destination = self.config.telegram.destination
-        if destination is None:
-            return
-        if post.attachment_paths:
-            # Telegram captions are limited to 1024 characters. Keep all text by
-            # sending it as one or more messages when it does not fit the caption.
-            caption = post.text if len(post.text) <= 1024 else None
-            await self.client.send_file(destination, post.attachment_paths, caption=caption)
-            if caption is not None:
-                return
-        for chunk in self._split_text(post.text):
-            await self.client.send_message(destination, chunk)
 
     async def _handle(self, event: Any) -> None:
         message = event.message
@@ -149,9 +206,9 @@ class TelegramMonitor:
                 image_paths=images,
                 attachment_paths=attachments,
             )
-            result = await self.processor.process(post, source)
+            result = await self.parser.process(post, source)
             if result:
-                await self._publish(result)
+                await self.poster.publish(result)
                 logger.info("Processed post %s/%s", chat_id, message.id)
         except Exception:
             logger.exception("Failed to process post %s/%s", chat_id, message.id)
@@ -168,10 +225,7 @@ class TelegramMonitor:
             if media is None:
                 return
             attachments, images = media
-            texts: list[str] = []
-            for message in messages:
-                if message.message:
-                    texts.append(message.message)
+            texts = [message.message for message in messages if message.message]
             post = IncomingPost(
                 source=str(source.chat),
                 chat_id=chat_id,
@@ -180,9 +234,9 @@ class TelegramMonitor:
                 image_paths=images,
                 attachment_paths=attachments,
             )
-            result = await self.processor.process(post, source)
+            result = await self.parser.process(post, source)
             if result:
-                await self._publish(result)
+                await self.poster.publish(result)
                 logger.info("Processed album %s/%s", chat_id, first.id)
         except Exception:
             logger.exception("Failed to process album %s/%s", chat_id, first.id)

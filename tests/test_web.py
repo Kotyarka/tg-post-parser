@@ -17,6 +17,8 @@ llm:
   api_key: llm-secret
   base_url: https://example.test/v1
   model: model
+gigachat:
+  authorization_key: gigachat-secret
 storage:
   database: state.db
   output_dir: output
@@ -38,6 +40,7 @@ def test_repository_masks_secrets(tmp_path: Path) -> None:
 
     assert public["telegram"]["api_hash"] == SECRET_MASK
     assert public["llm"]["api_key"] == SECRET_MASK
+    assert public["gigachat"]["authorization_key"] == SECRET_MASK
     assert public["analysis"] == {"enabled": True, "history_hours": 24}
 
 
@@ -54,6 +57,7 @@ def test_repository_preserves_masked_secrets_on_save(tmp_path: Path) -> None:
     saved = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert saved["telegram"]["api_hash"] == "telegram-secret"
     assert saved["llm"]["api_key"] == "llm-secret"
+    assert saved["gigachat"]["authorization_key"] == "gigachat-secret"
     assert saved["llm"]["model"] == "new-model"
     assert saved["analysis"] == {"enabled": False, "history_hours": 48}
 
