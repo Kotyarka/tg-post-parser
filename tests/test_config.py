@@ -29,6 +29,8 @@ sources:
     assert config.llm.api_key == "secret"
     assert config.storage.database == tmp_path / "state.db"
     assert config.storage.max_post_download_mb == 25
+    assert config.analysis.enabled is True
+    assert config.analysis.history_hours == 24
     assert config.sources[0].prompt_addition == "concise"
 
 

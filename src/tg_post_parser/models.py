@@ -5,6 +5,13 @@ from pathlib import Path
 
 
 @dataclass(slots=True)
+class PostAnalysis:
+    is_duplicate: bool
+    is_advertisement: bool
+    reason: str
+
+
+@dataclass(slots=True)
 class IncomingPost:
     source: str
     chat_id: int

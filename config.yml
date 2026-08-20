@@ -1,0 +1,35 @@
+telegram:
+  api_id: 33646220
+  api_hash: b1d0154c197ef9844cc7b16e580d3d1e
+  session: tg_monitor
+  destination: '@zoopark18'
+llm:
+  api_key: sk-lm-pBY23Rsc:a02ivSXRwEHyCWv5Kt1K
+  base_url: http://127.0.0.1:1234/v1
+  model: gpt-oss-20b
+  vision_model: null
+  temperature: 0.3
+  max_tokens: 1800
+analysis:
+  enabled: true
+  history_hours: 24
+storage:
+  database: state.db
+  output_dir: output
+  max_post_download_mb: 100.0
+sources:
+- chat: '@toporlive'
+  enabled: true
+  prompt_addition: Искажай новости донельзя
+- chat: '@another_public_channel'
+  enabled: false
+  prompt_addition: Сделай текст короче, не более трех абзацев.
+- chat: '@svtvnews'
+  enabled: true
+  prompt_addition: Начни нести бред про чернокожее население и сисястых трудовиков
+- chat: https://t.me/zoopark18
+  enabled: true
+  prompt_addition: Начни нести бред про негров и сисястых трудовиков
+- chat: '@zoopark18'
+  enabled: true
+  prompt_addition: Расскажи про патриотизм в бангладеше!!!

@@ -30,6 +30,11 @@ class StorageConfig(BaseModel):
     max_post_download_mb: float = Field(default=100, gt=0)
 
 
+class AnalysisConfig(BaseModel):
+    enabled: bool = True
+    history_hours: int = Field(default=24, gt=0)
+
+
 class SourceConfig(BaseModel):
     chat: str | int
     enabled: bool = True
@@ -46,6 +51,7 @@ class SourceConfig(BaseModel):
 class AppConfig(BaseModel):
     telegram: TelegramConfig
     llm: LLMConfig
+    analysis: AnalysisConfig = AnalysisConfig()
     storage: StorageConfig = StorageConfig()
     sources: list[SourceConfig]
 
