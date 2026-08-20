@@ -38,6 +38,7 @@ def test_repository_masks_secrets(tmp_path: Path) -> None:
 
     assert public["telegram"]["api_hash"] == SECRET_MASK
     assert public["llm"]["api_key"] == SECRET_MASK
+    assert public["analysis"] == {"enabled": True, "history_hours": 24}
 
 
 def test_repository_preserves_masked_secrets_on_save(tmp_path: Path) -> None:
@@ -46,6 +47,7 @@ def test_repository_preserves_masked_secrets_on_save(tmp_path: Path) -> None:
     repository = ConfigRepository(path)
     payload = repository.public()
     payload["llm"]["model"] = "new-model"
+    payload["analysis"] = {"enabled": False, "history_hours": 48}
 
     repository.save(payload)
 
@@ -53,6 +55,7 @@ def test_repository_preserves_masked_secrets_on_save(tmp_path: Path) -> None:
     assert saved["telegram"]["api_hash"] == "telegram-secret"
     assert saved["llm"]["api_key"] == "llm-secret"
     assert saved["llm"]["model"] == "new-model"
+    assert saved["analysis"] == {"enabled": False, "history_hours": 48}
 
 
 def test_web_api_and_terminal_websocket(tmp_path: Path) -> None:

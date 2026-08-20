@@ -51,6 +51,10 @@ class ConfigRepository:
                 "temperature": 0.3,
                 "max_tokens": 1800,
             },
+            "analysis": {
+                "enabled": True,
+                "history_hours": 24,
+            },
             "storage": {
                 "database": "state.db",
                 "output_dir": "output",

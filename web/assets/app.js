@@ -67,6 +67,10 @@ function Settings({ config, setConfig }) {
       <${Field} label="Температура"><input type="number" min="0" max="2" step="0.1" value=${config.llm.temperature} onChange=${e => set("llm", "temperature", Number(e.target.value))} /></${Field}>
       <${Field} label="Максимум токенов"><input type="number" min="1" value=${config.llm.max_tokens} onChange=${e => set("llm", "max_tokens", Number(e.target.value))} /></${Field}>
     </${Section}>
+    <${Section} title="Анализ и фильтрация" description="Проверка рекламы и смысловых дублей перед рерайтом">
+      <label className="switch-row setting-switch"><span><strong>Предварительный анализ включён</strong><small>Реклама и полные дубли не будут опубликованы</small></span><input type="checkbox" checked=${config.analysis.enabled} onChange=${e => set("analysis", "enabled", e.target.checked)} /><i></i></label>
+      <${Field} label="Глубина истории, часов" hint="Опубликованные посты за этот период передаются LLM для сравнения"><input type="number" min="1" step="1" disabled=${!config.analysis.enabled} value=${config.analysis.history_hours} onChange=${e => set("analysis", "history_hours", Number(e.target.value))} /></${Field}>
+    </${Section}>
     <${Section} title="Хранилище" description="Локальные результаты, база обработанных постов и лимиты">
       <${Field} label="Файл состояния"><input value=${config.storage.database} onChange=${e => set("storage", "database", e.target.value)} /></${Field}>
       <${Field} label="Каталог результатов"><input value=${config.storage.output_dir} onChange=${e => set("storage", "output_dir", e.target.value)} /></${Field}>
