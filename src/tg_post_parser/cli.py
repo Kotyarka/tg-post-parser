@@ -22,7 +22,7 @@ async def async_main(config_path: str) -> None:
     config = load_config(config_path)
     with PostStore(config.storage.database) as store:
         rewriter = LLMRewriter(config.llm)
-        processor = PostProcessor(rewriter, store, config.storage.output_dir)
+        processor = PostProcessor(rewriter, store, config.storage.output_dir, config.analysis)
         await TelegramMonitor(config, processor).run()
 
 
@@ -42,4 +42,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

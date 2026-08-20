@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from tg_post_parser.config import SourceConfig
-from tg_post_parser.models import IncomingPost
+from tg_post_parser.models import IncomingPost, PostAnalysis
 from tg_post_parser.service import PostProcessor
 from tg_post_parser.storage import PostStore
 
@@ -16,6 +16,10 @@ class FakeRewriter:
     async def rewrite(self, text, image_paths, prompt_addition):
         self.calls.append((text, image_paths, prompt_addition))
         return "Новая редакция"
+
+    async def analyze(self, text, image_paths, history):
+        self.analysis_call = (text, image_paths, history)
+        return PostAnalysis(False, False, "Полезный новый пост")
 
 
 @pytest.mark.asyncio
@@ -42,3 +46,30 @@ async def test_processor_persists_result_and_skips_duplicate(tmp_path: Path) -> 
     assert saved["text"] == "Новая редакция"
     assert saved["attachment_paths"] == [str(document)]
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("analysis", "expected_status"),
+    [
+        (PostAnalysis(True, False, "Смысловой дубль"), "filtered_duplicate"),
+        (PostAnalysis(False, True, "Есть рекламная ссылка"), "filtered_advertisement"),
+    ],
+)
+async def test_processor_filters_before_rewrite(tmp_path: Path, analysis, expected_status) -> None:
+    rewriter = FakeRewriter()
+
+    async def analyze(text, image_paths, history):
+        return analysis
+
+    rewriter.analyze = analyze
+    post = IncomingPost(source="@source", chat_id=1, message_id=2, text="original")
+    with PostStore(tmp_path / "state.db") as store:
+        processor = PostProcessor(rewriter, store, tmp_path / "output")
+        result = await processor.process(post, SourceConfig(chat="@source"))
+        row = store._connection.execute(
+            "SELECT status, filter_reason FROM processed_posts WHERE chat_id = 1 AND message_id = 2"
+        ).fetchone()
+
+    assert result is None
+    assert rewriter.calls == []
+    assert row == (expected_status, analysis.reason)

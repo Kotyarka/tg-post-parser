@@ -17,6 +17,16 @@ class PostStore:
                 PRIMARY KEY (chat_id, message_id)
             )"""
         )
+        columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(processed_posts)").fetchall()
+        }
+        if "original_text" not in columns:
+            self._connection.execute("ALTER TABLE processed_posts ADD COLUMN original_text TEXT")
+        if "status" not in columns:
+            self._connection.execute("ALTER TABLE processed_posts ADD COLUMN status TEXT")
+        if "filter_reason" not in columns:
+            self._connection.execute("ALTER TABLE processed_posts ADD COLUMN filter_reason TEXT")
         self._connection.commit()
 
     def contains(self, chat_id: int, message_id: int) -> bool:
@@ -26,10 +36,31 @@ class PostStore:
         ).fetchone()
         return row is not None
 
-    def mark_processed(self, chat_id: int, message_id: int) -> None:
+    def recent_published_texts(self, hours: int) -> list[str]:
+        rows = self._connection.execute(
+            """SELECT original_text FROM processed_posts
+               WHERE status = 'published'
+                 AND original_text IS NOT NULL
+                 AND original_text != ''
+                 AND processed_at >= datetime('now', ?)
+               ORDER BY processed_at DESC""",
+            (f"-{hours} hours",),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def mark_processed(
+        self,
+        chat_id: int,
+        message_id: int,
+        original_text: str | None = None,
+        status: str | None = None,
+        filter_reason: str | None = None,
+    ) -> None:
         self._connection.execute(
-            "INSERT OR IGNORE INTO processed_posts(chat_id, message_id) VALUES (?, ?)",
-            (chat_id, message_id),
+            """INSERT OR IGNORE INTO processed_posts(
+                   chat_id, message_id, original_text, status, filter_reason
+               ) VALUES (?, ?, ?, ?, ?)""",
+            (chat_id, message_id, original_text, status, filter_reason),
         )
         self._connection.commit()
 
@@ -41,4 +72,3 @@ class PostStore:
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
